@@ -11,7 +11,7 @@ typedef unsigned long long QWORD;
 #define getBits( x )    (INRANGE((x&(~0x20)),'A','F') ? ((x&(~0x20)) - 'A' + 0xa) : (INRANGE(x,'0','9') ? x - '0' : 0))
 #define getByte( x )    (getBits(x[0]) << 4 | getBits(x[1]))
 
-static QWORD find_pattern_nt(_In_ const char* sig, _In_ QWORD start, _In_ QWORD size)
+static QWORD find_pattern_nt(_In_ CONST CHAR* sig, _In_ QWORD start, _In_ QWORD size)
 {
 	QWORD match = 0;
 	const char* pat = sig;
@@ -41,9 +41,9 @@ static QWORD find_pattern_nt(_In_ const char* sig, _In_ QWORD start, _In_ QWORD 
 }
 
 /*
-	We look for a code cave of CC instructions inside the .text section
+	Finds a suitable length code cave consisting of CC bytes inside the .text section of the given module
 */
-static QWORD find_codecave(_In_ void* module, _In_ int length, _In_opt_ QWORD begin)
+static QWORD find_codecave(_In_ VOID* module, _In_ INT length, _In_opt_ QWORD begin)
 {
 	IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)module;
 	IMAGE_NT_HEADERS* nt_headers = (IMAGE_NT_HEADERS*)((BYTE*)dos_header + dos_header->e_lfanew);
@@ -51,11 +51,11 @@ static QWORD find_codecave(_In_ void* module, _In_ int length, _In_opt_ QWORD be
 	QWORD start = 0, size = 0;
 
 	QWORD header_offset = (QWORD)IMAGE_FIRST_SECTION(nt_headers);
-	for (int x = 0; x < nt_headers->FileHeader.NumberOfSections; ++x)
+	for (INT x = 0; x < nt_headers->FileHeader.NumberOfSections; ++x)
 	{
 		IMAGE_SECTION_HEADER* header = (IMAGE_SECTION_HEADER*)header_offset;
 
-		if (strcmp((char*)header->Name, ".text") == 0)
+		if (strcmp((CHAR*)header->Name, ".text") == 0)
 		{
 			start = (QWORD)module + header->PointerToRawData;
 			size = header->SizeOfRawData;
@@ -66,7 +66,7 @@ static QWORD find_codecave(_In_ void* module, _In_ int length, _In_opt_ QWORD be
 	}
 
 	QWORD match = 0;
-	int curlength = 0;
+	INT curlength = 0;
 
 	for (QWORD cur = (begin ? begin : start); cur < start + size; ++cur)
 	{
@@ -82,26 +82,26 @@ static QWORD find_codecave(_In_ void* module, _In_ int length, _In_opt_ QWORD be
 }
 
 /*
-	Here we remap the page the desired address is in with PAGE_EXECUTE_READWRITE access
+	Remaps the page where the target address is in with PAGE_EXECUTE_READWRITE access and patches the given bytes
 */
-static NTSTATUS remap_page(_In_ PVOID address, _In_ BYTE* asm, _In_ ULONG length)
+static BOOLEAN remap_page(_In_ VOID* address, _In_ BYTE* asm, _In_ ULONG length)
 {
-	MDL* mdl = IoAllocateMdl((void*)address, length, FALSE, FALSE, 0);
+	MDL* mdl = IoAllocateMdl((VOID*)address, length, FALSE, FALSE, 0);
 	if (!mdl)
 	{
 		DbgPrint("[-] Failed allocating MDL!\n");
-		return STATUS_UNSUCCESSFUL;
+		return FALSE;
 	}
 
 	MmProbeAndLockPages(mdl, KernelMode, IoReadAccess);
 
-	void* map_address = MmMapLockedPagesSpecifyCache(mdl, KernelMode, MmNonCached, 0, FALSE, NormalPagePriority);
+	VOID* map_address = MmMapLockedPagesSpecifyCache(mdl, KernelMode, MmNonCached, 0, FALSE, NormalPagePriority);
 	if (!map_address)
 	{
 		DbgPrint("[-] Failed mapping the page!\n");
 		MmUnlockPages(mdl);
 		IoFreeMdl(mdl);
-		return STATUS_UNSUCCESSFUL;
+		return FALSE;
 	}
 
 	NTSTATUS status = MmProtectMdlSystemAddress(mdl, PAGE_EXECUTE_READWRITE);
@@ -111,7 +111,7 @@ static NTSTATUS remap_page(_In_ PVOID address, _In_ BYTE* asm, _In_ ULONG length
 		MmUnmapLockedPages(map_address, mdl);
 		MmUnlockPages(mdl);
 		IoFreeMdl(mdl);
-		return STATUS_UNSUCCESSFUL;
+		return FALSE;
 	}
 
 	RtlCopyMemory(map_address, asm, length);
@@ -120,24 +120,24 @@ static NTSTATUS remap_page(_In_ PVOID address, _In_ BYTE* asm, _In_ ULONG length
 	MmUnlockPages(mdl);
 	IoFreeMdl(mdl);
 
-	return STATUS_SUCCESS;
+	return TRUE;
 }
 
-static NTSTATUS patch_codecave_detour(_In_ QWORD address, _In_ QWORD target)
+static BOOLEAN patch_codecave_detour(_In_ QWORD address, _In_ QWORD target)
 {
 	BYTE asm[16] = {
-		0x50,														// push rax
-		0x48, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,	// mov rax, TARGET
-		0x48, 0x87, 0x04, 0x24,										// xchg QWORD PTR[rsp], rax
-		0xC3														// ret
+		0x50,                                                        // push rax
+		0x48, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // mov rax, TARGET
+		0x48, 0x87, 0x04, 0x24,                                      // xchg QWORD PTR[rsp], rax
+		0xC3                                                         // ret
 	};
 	*(QWORD*)(asm + 3) = target;
 
-	return remap_page((void*)address, asm, 16);
+	return remap_page((VOID*)address, asm, 16);
 }
 
-static void to_lower(_In_ char* in, _Out_ char* out)
+static VOID to_lower(_In_ CHAR* in, _Out_ CHAR* out)
 {
-	int i = -1;
-	while (in[++i] != '\x00') out[i] = (char)tolower(in[i]);
+	INT i = -1;
+	while (in[++i] != '\x00') out[i] = (CHAR)tolower(in[i]);
 }
