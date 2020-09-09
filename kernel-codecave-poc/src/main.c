@@ -65,7 +65,7 @@ NTSTATUS apply_codecaves()
 	
 	/*
 		We need to find 2 16 byte codecaves:
-		address will be the detour to the CreateProcess callback and we store this is g_callback_address
+		address will be the detour to the CreateProcess callback and we store this in g_callback_address
 		address2 will be the detour for our main thread
 	*/
 	QWORD address = 0, address2 = 0;
@@ -89,16 +89,16 @@ NTSTATUS apply_codecaves()
 			continue;
 		}
 
-		DbgPrint("[+] Found places for both code caves in module %s\n", driver_name + module->OffsetToFileName);
-
-		// Setting the 0x20 data table entry flag makes MmVerifyCallbackFunction pass
 		LDR_DATA_TABLE_ENTRY* ldr = MiLookupDataTableEntry((void*)address, FALSE);
 		if (!ldr)
 		{
 			address = address2 = 0;
 			continue;
 		}
+
+		// Setting the 0x20 data table entry flag makes MmVerifyCallbackFunction pass
 		ldr->Flags |= 0x20;
+		DbgPrint("[+] Found places for both code caves in module %s\n", driver_name + module->OffsetToFileName);
 
 		break;
 	}

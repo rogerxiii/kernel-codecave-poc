@@ -10,5 +10,5 @@ We specifically search for CC bytes instead of simply 00 and 90, to make sure th
 In this PoC a thread is created and *PsSetCreateProcessNotifyRoutineEx* is called to register a callback.  
 One extra thing to note is that we also have to bypass the *MmVerifyCallbackFunction* check, which we do by directly changing the data table entry flags corresponding to the memory region.  
   
-For more information, see this thread:
+For more information, see this thread:  
 https://www.unknowncheats.me/forum/xxxxxxxxxxxx
