@@ -40,8 +40,17 @@ static QWORD find_pattern_nt(_In_ CONST CHAR* sig, _In_ QWORD start, _In_ QWORD 
 	return 0;
 }
 
+static BOOLEAN is_retop(_In_ BYTE op)
+{
+	return op == 0xC2 ||   // RETN + POP
+		op == 0xC3 ||      // RETN
+		op == 0xCA ||      // RETF + POP
+		op == 0xCB;        // RETF
+}
+
 /*
-	Finds a suitable length code cave consisting of CC bytes inside the .text section of the given module
+	Finds a suitable length code cave inside the .text section of the given module
+	A valid code cave is a sequence of CC bytes prefixed by a return statement
 */
 static QWORD find_codecave(_In_ VOID* module, _In_ INT length, _In_opt_ QWORD begin)
 {
@@ -67,26 +76,34 @@ static QWORD find_codecave(_In_ VOID* module, _In_ INT length, _In_opt_ QWORD be
 
 	QWORD match = 0;
 	INT curlength = 0;
+	BOOLEAN ret = FALSE;
 
 	for (QWORD cur = (begin ? begin : start); cur < start + size; ++cur)
 	{
-		if (*(BYTE*)cur == 0xCC)
+		if (!ret && is_retop(*(BYTE*)cur)) ret = TRUE;
+		else if (ret && *(BYTE*)cur == 0xCC)
 		{
 			if (!match) match = cur;
 			if (++curlength == length) return match;
 		}
-		else match = curlength = 0;
+
+		else
+		{
+			match = curlength = 0;
+			ret = FALSE;
+		}
 	}
 
 	return 0;
 }
 
 /*
-	Remaps the page where the target address is in with PAGE_EXECUTE_READWRITE access and patches the given bytes
+	Remaps the page where the target address is in with PAGE_EXECUTE_READWRITE protection and patches in the given bytes
+	If this is the restore routine, then after patching in the bytes the protection is set back to PAGE_READONLY
 */
-static BOOLEAN remap_page(_In_ VOID* address, _In_ BYTE* asm, _In_ ULONG length)
+static BOOLEAN remap_page(_In_ VOID* address, _In_ BYTE* asm, _In_ ULONG length, _In_ BOOLEAN restore)
 {
-	MDL* mdl = IoAllocateMdl((VOID*)address, length, FALSE, FALSE, 0);
+	MDL* mdl = IoAllocateMdl(address, length, FALSE, FALSE, 0);
 	if (!mdl)
 	{
 		DbgPrint("[-] Failed allocating MDL!\n");
@@ -116,6 +133,19 @@ static BOOLEAN remap_page(_In_ VOID* address, _In_ BYTE* asm, _In_ ULONG length)
 
 	RtlCopyMemory(map_address, asm, length);
 
+	if (restore)
+	{
+		status = MmProtectMdlSystemAddress(mdl, PAGE_READONLY);
+		if (status)
+		{
+			DbgPrint("[-] Failed second MmProtectMdlSystemAddress with status: 0x%lX\n", status);
+			MmUnmapLockedPages(map_address, mdl);
+			MmUnlockPages(mdl);
+			IoFreeMdl(mdl);
+			return FALSE;
+		}
+	}
+
 	MmUnmapLockedPages(map_address, mdl);
 	MmUnlockPages(mdl);
 	IoFreeMdl(mdl);
@@ -129,11 +159,21 @@ static BOOLEAN patch_codecave_detour(_In_ QWORD address, _In_ QWORD target)
 		0x50,                                                        // push rax
 		0x48, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // mov rax, TARGET
 		0x48, 0x87, 0x04, 0x24,                                      // xchg QWORD PTR[rsp], rax
-		0xC3                                                         // ret
+		0xC3                                                         // retn
 	};
 	*(QWORD*)(asm + 3) = target;
 
-	return remap_page((VOID*)address, asm, 16);
+	return remap_page((VOID*)address, asm, 16, FALSE);
+}
+
+static BOOLEAN restore_codecave_detour(_In_ QWORD address)
+{
+	BYTE asm[16] = {
+		0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+		0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC
+	};
+
+	return remap_page((VOID*)address, asm, 16, TRUE);
 }
 
 static VOID to_lower(_In_ CHAR* in, _Out_ CHAR* out)

@@ -10,6 +10,10 @@ QWORD g_callback_address = 0, g_thread_address = 0;
 
 
 
+/*
+	The (detoured) CreateProcess callback will enter here
+	Note that the accompanying shellcode cannot be removed, as it still gets called regularly
+*/
 VOID create_process_callback(_In_ KPROCESS* process, _In_ HANDLE process_id, _In_ PS_CREATE_NOTIFY_INFO* create_info)
 {
 	UNREFERENCED_PARAMETER(process_id);
@@ -19,9 +23,16 @@ VOID create_process_callback(_In_ KPROCESS* process, _In_ HANDLE process_id, _In
 	DbgPrint("[+] [callback] Process created: %s\n", proc->ImageFileName);
 }
 
+/*
+	The (detoured) main thread will enter here, this can be looped infinitely without worry
+	As soon as the thread gets created the shellcode and the page protection are restored to hide any traces
+*/
 VOID main_thread()
 {
-	DbgPrint("[+] Inside main_thread\n");
+	DbgPrint("[+] Inside main thread\n");
+
+	if (!restore_codecave_detour(g_thread_address)) DbgPrint("[-] Failed restoring thread code cave!\n");
+	else DbgPrint("[+] Restored thread code cave");
 
 	NTSTATUS status = PsSetCreateProcessNotifyRoutineEx((PCREATE_PROCESS_NOTIFY_ROUTINE_EX)g_callback_address, FALSE);
 	if (status) DbgPrint("[-] Failed PsSetCreateProcessNotifyRoutineEx with status: 0x%lX\n", status);
