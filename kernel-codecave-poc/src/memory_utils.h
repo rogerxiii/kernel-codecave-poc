@@ -181,3 +181,12 @@ static VOID to_lower(_In_ CHAR* in, _Out_ CHAR* out)
 	INT i = -1;
 	while (in[++i] != '\x00') out[i] = (CHAR)tolower(in[i]);
 }
+
+static BOOLEAN is_pg_protected(_In_ CONST CHAR* image)
+{
+	static const INT count = 8;
+	static const char* images[] = { "win32kbase.sys", "tm.sys", "clfs.sys", "msrpc.sys", "ndis.sys", "ntfs.sys", "tcpip.sys", "fltmgr.sys" };
+
+	for (INT i = 0; i < count; ++i) if (strstr(images[i], image)) return TRUE;
+	return FALSE;
+}

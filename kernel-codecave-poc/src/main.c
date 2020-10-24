@@ -82,7 +82,7 @@ BOOLEAN apply_codecaves()
 
 		CHAR driver_name[0x0100] = { 0 };
 		to_lower(module->FullPathName, driver_name);
-		if (!strstr(driver_name, ".sys") || strstr(driver_name, "win32kbase")) continue;
+		if (!strstr(driver_name, ".sys") || is_pg_protected(driver_name)) continue;
 
 		g_callback_address = find_codecave(module->ImageBase, 16, 0);
 		if (!g_callback_address) continue;
